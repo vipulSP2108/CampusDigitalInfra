@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
 import { LIFECYCLE_CONFIG } from "@/config/lifecycle";
-import { checkAndRunArchivalSweep } from "@/lib/lifecycle/lifecycleService";
 
 export const dynamic = "force-dynamic";
 
@@ -14,13 +13,6 @@ export async function GET(req: NextRequest) {
         { success: false, error: "Authentication required to access personal request history." },
         { status: 401 }
       );
-    }
-
-    // Automatically sweep closed requests whose 3-day cooldown expired into secondary storage
-    try {
-      await checkAndRunArchivalSweep();
-    } catch (sweepErr) {
-      console.error("Auto archival sweep warning in /api/requests/my:", sweepErr);
     }
 
     const { searchParams } = new URL(req.url);

@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
 import { buildDepartmentFilter } from "@/lib/auth/rbac";
-import { checkAndRunArchivalSweep } from "@/lib/lifecycle/lifecycleService";
 import { sortComplaintsByOperationalPriority } from "@/lib/queue/sorting";
 import crypto from "crypto";
 
@@ -97,13 +96,6 @@ export async function GET(req: NextRequest) {
       },
       orderBy: { createdAt: "desc" },
     });
-
-    // Ensure archival sweep runs to keep primary database and secondary storage synchronized
-    try {
-      await checkAndRunArchivalSweep();
-    } catch (e) {
-      console.error("Archival sweep error:", e);
-    }
 
     // Sort complaints by operational priority according to role context
     const sortedRequests = sortComplaintsByOperationalPriority(requests, currentUser);

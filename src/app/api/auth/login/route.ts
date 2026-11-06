@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { setSessionUserCookie } from "@/lib/auth/session";
+import { createSession } from "@/lib/auth/session";
 import { ALLOWED_USERS } from "@/config/users";
 
 export async function POST(req: NextRequest) {
@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Set auth session cookie
-      setSessionUserCookie(cleanEmail);
+      await createSession(cleanEmail);
 
       return NextResponse.json({
         success: true,
@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Set cookie
-    setSessionUserCookie(user.email);
+    await createSession(user.email);
 
     return NextResponse.json({
       success: true,
