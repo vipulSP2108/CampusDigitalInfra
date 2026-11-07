@@ -56,12 +56,8 @@ const ICON_MAP: Record<string, any> = {
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const [categories, departments, currentUser] = await Promise.all([
+  const [categories, currentUser] = await Promise.all([
     getActiveCategories(),
-    prisma.department.findMany({
-      where: { active: true },
-      select: { id: true, code: true, name: true, description: true },
-    }),
     getCurrentUser(),
   ]);
 
@@ -86,7 +82,7 @@ export default async function HomePage() {
           </h1>
 
           <p className="max-w-2xl mx-auto text-slate-300 text-xs sm:text-base leading-relaxed px-2">
-            Submit maintenance complaints across student hostels, staff housing, academic blocks, and campus facilities with automated SLA escalation timers.
+            Submit maintenance complaints across student hostels, staff housing, academic blocks, and campus facilities.
           </p>
 
           {/* Quick Track Input Bar */}
@@ -201,40 +197,6 @@ export default async function HomePage() {
               </Link>
             );
           })}
-        </div>
-      </section>
-
-      {/* Department Breakdown Section */}
-      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 sm:p-8 shadow-xs">
-          <div className="mb-6">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
-              Institute Works Maintenance Departments
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Dedicated engineering teams with automated escalation SLAs (Level 1 AEE, Level 2 EE, Level 3 SE).
-            </p>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-            {departments.map((dept) => (
-              <div
-                key={dept.id}
-                className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 hover:bg-white dark:hover:bg-slate-800 hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200">
-                    {dept.code}
-                  </span>
-                  <span className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
-                    Operational
-                  </span>
-                </div>
-                <h4 className="font-semibold text-xs sm:text-sm text-slate-800 dark:text-slate-100 mt-2">{dept.name}</h4>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-1">{dept.description}</p>
-              </div>
-            ))}
-          </div>
         </div>
       </section>
     </div>

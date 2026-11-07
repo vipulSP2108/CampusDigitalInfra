@@ -1075,18 +1075,6 @@ function SingleTicketTrackContent() {
                 </button>
               )}
 
-              {request.status !== "CLOSED" && (
-                <button
-                  type="button"
-                  disabled={isUpdatingStatus}
-                  onClick={() => handleStaffUpdateStatus("CLOSED")}
-                  className="py-2.5 px-3 rounded-xl bg-white/10 hover:bg-white/20 text-white font-medium text-xs flex items-center justify-center gap-1.5 border border-white/15 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
-                >
-                  <CheckCheck className="w-3.5 h-3.5" />
-                  <span>Close Ticket</span>
-                </button>
-              )}
-
               {(request.status === "CLOSED" || request.status === "RESOLVED") && (
                 <button
                   type="button"
@@ -1696,27 +1684,6 @@ function SingleTicketTrackContent() {
               </div>
             </div>
           </div>
-
-          {/* Department SLA & Redressal Status Card */}
-          <div className="bg-slate-900 text-white rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 shadow-md space-y-2.5 border border-slate-800 w-full min-w-0 overflow-hidden">
-            <div className="flex items-center space-x-2 text-amber-400 font-bold text-xs">
-              <ShieldAlert className="w-4 h-4 shrink-0" />
-              <span>Department Service Level (SLA)</span>
-            </div>
-            <div className="space-y-1.5 text-xs">
-              <div className="flex flex-wrap justify-between text-slate-300 gap-1">
-                <span>Target Resolution SLA:</span>
-                <span className="font-semibold text-white">{request.department?.slaHoursL1 || 24} Hours</span>
-              </div>
-              <div className="flex flex-wrap justify-between text-slate-300 gap-1">
-                <span>Current Escalation State:</span>
-                <span className={`font-bold ${request.escalationLevel === 0 ? "text-slate-400" : "text-amber-400"
-                  }`}>
-                  {request.escalationLevel === 0 ? "Standard Service" : `Tier ${request.escalationLevel} Escalated`}
-                </span>
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Right Column: Communication Thread & Timeline (4th Position: Follow-up Notes) */}
@@ -2071,7 +2038,7 @@ function SingleTicketTrackContent() {
               Automated 3-Tier Escalation Hierarchy
             </h2>
             <p className="text-slate-300 text-xs mt-1 leading-relaxed break-words">
-              If delayed beyond standard service levels, the system supports automatic and manual escalation according to {request.department?.name} SLAs.
+              If delayed or unresolved, the system supports automatic and manual escalation to senior engineers and department heads.
             </p>
           </div>
 

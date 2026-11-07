@@ -56,7 +56,6 @@ import {
   History,
   RotateCcw,
   Camera,
-  Calendar,
   MessageCircle,
 } from "lucide-react";
 import ImageLightboxModal from "@/components/ImageLightboxModal";
@@ -226,20 +225,6 @@ export default function AdminPortalPage() {
   const [showPurgeArchivedModal, setShowPurgeArchivedModal] = useState(false);
   const [isPurgingArchived, setIsPurgingArchived] = useState(false);
 
-  // SuperApp Global Calendar State
-  const [scheduleDate, setScheduleDate] = useState("");
-  const [scheduleStartTime, setScheduleStartTime] = useState("10:00");
-  const [scheduleEndTime, setScheduleEndTime] = useState("11:30");
-  const [isSchedulingCalendar, setIsSchedulingCalendar] = useState(false);
-  const [calendarSyncFeedback, setCalendarSyncFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
-  const [calendarEventsData, setCalendarEventsData] = useState<{
-    remoteConnected: boolean;
-    remoteEvents: any[];
-    scheduledTickets: any[];
-    moduleKey: string;
-  } | null>(null);
-  const [isLoadingCalendar, setIsLoadingCalendar] = useState(false);
-
   // Secondary Archival DB State
   const [archivedRequests, setArchivedRequests] = useState<any[]>([]);
   const [isLoadingArchived, setIsLoadingArchived] = useState(false);
@@ -274,18 +259,6 @@ export default function AdminPortalPage() {
   });
   const [isCreatingUser, setIsCreatingUser] = useState(false);
 
-  // Department SLA Edit State
-  const [editingDept, setEditingDept] = useState<any | null>(null);
-  const [deptForm, setDeptForm] = useState({
-    slaHoursL1: 24,
-    slaHoursL2: 72,
-    slaHoursL3: 168,
-    leadEmail: "",
-    leadPhone: "",
-    description: "",
-  });
-  const [isSavingDept, setIsSavingDept] = useState(false);
-  const [deptSaveSuccess, setDeptSaveSuccess] = useState<string | null>(null);
   const [userDeptFilter, setUserDeptFilter] = useState<string>("ALL");
 
   // Authentication State
@@ -588,6 +561,7 @@ export default function AdminPortalPage() {
       fetchRoles();
       fetchUsers();
       fetchCategories();
+      fetchSettings();
     }
   }, [selectedDeptFilter, selectedStatusFilter, selectedPriorityFilter, currentUser]);
 
@@ -637,15 +611,20 @@ export default function AdminPortalPage() {
   };
 
   // Fetch Staff Visibility Settings
+  const fetchSettings = async () => {
+    try {
+      const res = await fetch("/api/admin/settings");
+      const data = await res.json();
+      if (data.success && data.settings) {
+        setAllowStaffViewUnassigned(data.settings.allowStaffViewUnassigned !== false);
+      }
+    } catch (e) {
+      console.error("Failed to fetch settings:", e);
+    }
+  };
+
   useEffect(() => {
-    fetch("/api/admin/settings")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.success && data.settings) {
-          setAllowStaffViewUnassigned(data.settings.allowStaffViewUnassigned !== false);
-        }
-      })
-      .catch(() => {});
+    fetchSettings();
   }, []);
 
   // Toggle whether field staff can view unassigned pool tasks
@@ -662,6 +641,8 @@ export default function AdminPortalPage() {
       if (!data.success) {
         setAllowStaffViewUnassigned(!nextVal);
         alert(data.error || "Failed to update setting");
+      } else {
+        fetchRequests();
       }
     } catch (e) {
       setAllowStaffViewUnassigned(!nextVal);
@@ -832,23 +813,6 @@ export default function AdminPortalPage() {
     setSelectedTechnicianId(r.assignedStaffId || "");
     setStaffNoteText("");
     setStaffNotePhotos([]);
-    setCalendarSyncFeedback(null);
-
-    // Initialize calendar schedule inputs
-    if (r.scheduledStartAt) {
-      const d = new Date(r.scheduledStartAt);
-      setScheduleDate(d.toISOString().split("T")[0]);
-      setScheduleStartTime(d.toTimeString().slice(0, 5));
-      if (r.scheduledEndAt) {
-        setScheduleEndTime(new Date(r.scheduledEndAt).toTimeString().slice(0, 5));
-      }
-    } else {
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      setScheduleDate(tomorrow.toISOString().split("T")[0]);
-      setScheduleStartTime("10:00");
-      setScheduleEndTime("11:30");
-    }
 
     try {
       const res = await fetch(`/api/requests/${r.id}?staffView=true`);
@@ -856,128 +820,9 @@ export default function AdminPortalPage() {
       if (data.success && data.request) {
         setSelectedRequest(data.request);
         setSelectedTechnicianId(data.request.assignedStaffId || "");
-        if (data.request.scheduledStartAt) {
-          const d = new Date(data.request.scheduledStartAt);
-          setScheduleDate(d.toISOString().split("T")[0]);
-          setScheduleStartTime(d.toTimeString().slice(0, 5));
-          if (data.request.scheduledEndAt) {
-            setScheduleEndTime(new Date(data.request.scheduledEndAt).toTimeString().slice(0, 5));
-          }
-        }
       }
     } catch (e) {
       console.error("Failed to load details for request:", e);
-    }
-  };
-
-  // Fetch SuperApp Global Calendar events and status
-  const fetchCalendarEvents = async () => {
-    setIsLoadingCalendar(true);
-    try {
-      const res = await fetch("/api/calendar");
-      const data = await res.json();
-      if (data.success) {
-        setCalendarEventsData(data);
-      }
-    } catch (e) {
-      console.error("Failed to fetch calendar events:", e);
-    } finally {
-      setIsLoadingCalendar(false);
-    }
-  };
-
-  // Schedule repair on SuperApp Global Calendar
-  const handleScheduleOnCalendar = async () => {
-    if (!selectedRequest || !scheduleDate) {
-      alert("Please choose a date for the repair visit.");
-      return;
-    }
-
-    const startIso = `${scheduleDate}T${scheduleStartTime}:00+05:30`;
-    const endIso = `${scheduleDate}T${scheduleEndTime}:00+05:30`;
-
-    setIsSchedulingCalendar(true);
-    setCalendarSyncFeedback(null);
-    try {
-      const res = await fetch("/api/calendar", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ticketId: selectedRequest.id,
-          ticketNumber: selectedRequest.ticketNumber,
-          title: `IWD Repair: ${selectedRequest.subject} (${selectedRequest.ticketNumber})`,
-          startAt: startIso,
-          endAt: endIso,
-          description: `Scheduled maintenance dispatch for ${selectedRequest.subject}. Location: ${selectedRequest.locationDetail}`,
-          location: selectedRequest.locationDetail,
-          timeZone: "Asia/Kolkata",
-          allDay: false,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || "Failed to schedule on SuperApp Global Calendar.");
-      }
-
-      setCalendarSyncFeedback({
-        type: "success",
-        message: data.message || `Scheduled on SuperApp Calendar (ID: ${data.calendarEventId})`,
-      });
-
-      setSelectedRequest((prev: any) => ({
-        ...prev,
-        calendarEventId: data.calendarEventId,
-        scheduledStartAt: startIso,
-        scheduledEndAt: endIso,
-      }));
-
-      fetchRequests();
-    } catch (err: any) {
-      setCalendarSyncFeedback({
-        type: "error",
-        message: err.message || "Failed to schedule on calendar.",
-      });
-    } finally {
-      setIsSchedulingCalendar(false);
-    }
-  };
-
-  // Cancel event on SuperApp Global Calendar
-  const handleCancelCalendarSchedule = async () => {
-    if (!selectedRequest?.calendarEventId) return;
-    if (!confirm("Are you sure you want to cancel this event on the SuperApp Global Calendar?")) return;
-
-    setIsSchedulingCalendar(true);
-    try {
-      const res = await fetch(`/api/calendar/${encodeURIComponent(selectedRequest.calendarEventId)}`, {
-        method: "DELETE",
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || "Failed to cancel calendar event.");
-      }
-
-      setCalendarSyncFeedback({
-        type: "success",
-        message: "Calendar event cancelled successfully.",
-      });
-
-      setSelectedRequest((prev: any) => ({
-        ...prev,
-        calendarEventId: null,
-        scheduledStartAt: null,
-        scheduledEndAt: null,
-      }));
-
-      fetchRequests();
-    } catch (err: any) {
-      setCalendarSyncFeedback({
-        type: "error",
-        message: err.message || "Failed to cancel calendar schedule.",
-      });
-    } finally {
-      setIsSchedulingCalendar(false);
     }
   };
 
@@ -1274,50 +1119,6 @@ export default function AdminPortalPage() {
     setShowAddUserModal(true);
   };
 
-  // Open Edit Department SLA Modal
-  const handleOpenEditDept = (dept: any) => {
-    setEditingDept(dept);
-    setDeptForm({
-      slaHoursL1: dept.slaHoursL1 || 24,
-      slaHoursL2: dept.slaHoursL2 || (dept.slaHoursL1 ? dept.slaHoursL1 * 3 : 72),
-      slaHoursL3: dept.slaHoursL3 || (dept.slaHoursL1 ? dept.slaHoursL1 * 7 : 168),
-      leadEmail: dept.leadEmail || "",
-      leadPhone: dept.leadPhone || "",
-      description: dept.description || "",
-    });
-    setDeptSaveSuccess(null);
-  };
-
-  // Save Department SLAs & Lead
-  const handleSaveDept = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingDept) return;
-    setIsSavingDept(true);
-    setDeptSaveSuccess(null);
-    try {
-      const res = await fetch("/api/admin/departments", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id: editingDept.id,
-          ...deptForm,
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setDeptSaveSuccess(`Updated SLAs and contacts for ${editingDept.name}!`);
-        fetchOptions();
-        setTimeout(() => setEditingDept(null), 1000);
-      } else {
-        alert(data.error || "Failed to update department SLA");
-      }
-    } catch (e: any) {
-      alert(e.message || "Failed to save department.");
-    } finally {
-      setIsSavingDept(false);
-    }
-  };
-
   // Toggle User Active Status
   const handleToggleUserActive = async (userId: string, currentActive: boolean) => {
     try {
@@ -1363,6 +1164,7 @@ export default function AdminPortalPage() {
   const isDeptAdmin = currentUser?.roleLevel === 2 || currentUser?.roleCode === "DEPT_ADMIN";
   const isDeptStaff = currentUser?.roleLevel === 3 || currentUser?.roleCode === "DEPT_STAFF";
   const canManageDeptOrUniversal = isLevel1Admin || isDeptAdmin;
+  const showAssignedToCol = canManageDeptOrUniversal || allowStaffViewUnassigned;
 
   // Multi-tier operational queue sorting with optional unassigned-only view
   const sortedRequests = useMemo(() => {
@@ -1620,7 +1422,7 @@ export default function AdminPortalPage() {
         <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-rose-200 dark:border-rose-900/50 bg-rose-50/20 dark:bg-rose-950/20 shadow-xs col-span-2 sm:col-span-1">
           <p className="text-xs font-semibold text-rose-700 dark:text-rose-400">Urgent / Escalated</p>
           <p className="text-2xl font-black text-rose-600 dark:text-rose-400 mt-1">{kpis.urgent}</p>
-          <span className="text-[10px] text-rose-600 dark:text-rose-400">Emergency & SLA Tier 1-3</span>
+          <span className="text-[10px] text-rose-600 dark:text-rose-400">Emergency & Tier 1-3 Escalations</span>
         </div>
       </div>
 
@@ -1676,17 +1478,6 @@ export default function AdminPortalPage() {
           </>
         )}
 
-        <button
-          onClick={() => setActiveTab("departments")}
-          className={`pb-3 transition-colors border-b-2 flex items-center space-x-2 ${activeTab === "departments"
-            ? "border-indigo-600 text-indigo-600"
-            : "border-transparent text-slate-500 hover:text-slate-800"
-            }`}
-        >
-          <Building className="w-4 h-4" />
-          <span>Department SLAs</span>
-        </button>
-
         {isLevel1Admin && (
           <button
             onClick={() => {
@@ -1702,19 +1493,6 @@ export default function AdminPortalPage() {
             <span>Archived (Secondary DB)</span>
           </button>
         )}
-        <button
-          onClick={() => {
-            setActiveTab("calendar");
-            fetchCalendarEvents();
-          }}
-          className={`pb-3 transition-colors border-b-2 flex items-center space-x-2 ${activeTab === "calendar"
-            ? "border-indigo-600 text-indigo-600"
-            : "border-transparent text-slate-500 hover:text-slate-800"
-            }`}
-        >
-          <Calendar className="w-4 h-4" />
-          <span>Global Calendar</span>
-        </button>
       </div>
 
       {/* TAB 1: COMPLAINTS WORK QUEUE */}
@@ -1978,30 +1756,17 @@ export default function AdminPortalPage() {
                                     </option>
                                   ))}
                               </select>
-                            ) : r.assignedStaff ? (
-                              <span
-                                className={`text-[10px] font-medium ${
-                                  isAssignedToMe
-                                    ? "text-indigo-700 dark:text-indigo-300 font-bold bg-indigo-50 dark:bg-indigo-950/70 px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-900/60"
-                                    : "text-slate-500 dark:text-slate-400"
-                                }`}
-                              >
-                                Tech:{" "}
-                                <strong
-                                  className={
-                                    isAssignedToMe
-                                      ? "text-indigo-700 dark:text-indigo-300 font-bold"
-                                      : "text-slate-700 dark:text-slate-300"
-                                  }
-                                >
-                                  {isAssignedToMe ? "You" : r.assignedStaff.name}
-                                </strong>
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center text-[9px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-900/60">
-                                Needs Assignment
-                              </span>
-                            )}
+                            ) : allowStaffViewUnassigned ? (
+                              isAssignedToMe ? (
+                                <span className="inline-flex items-center text-[9px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/70 px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-900/60">
+                                  ★ Assigned to You
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center text-[9px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-900/60">
+                                  -- Unassigned --
+                                </span>
+                              )
+                            ) : null}
                           </div>
 
                           <div className="flex items-center gap-2">
@@ -2040,7 +1805,7 @@ export default function AdminPortalPage() {
                         <th className="px-4 py-3.5">Requester</th>
                         <th className="px-4 py-3.5">Priority</th>
                         <th className="px-4 py-3.5">Status</th>
-                        <th className="px-4 py-3.5">Assigned To</th>
+                        {showAssignedToCol && <th className="px-4 py-3.5">Assigned To</th>}
                         <th className="px-5 py-3.5 text-right">Actions</th>
                       </tr>
                     </thead>
@@ -2149,50 +1914,39 @@ export default function AdminPortalPage() {
                                 )}
                               </div>
                             </td>
-                            <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
-                              {canManageDeptOrUniversal ? (
-                                <select
-                                  value={r.assignedStaffId || r.assignedStaff?.id || ""}
-                                  onChange={(e) => handleQuickAssignTechnician(r.id, e.target.value)}
-                                  className={`text-xs px-2.5 py-1 rounded-lg border max-w-[170px] truncate cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500 font-medium ${
-                                    r.assignedStaffId || r.assignedStaff
-                                      ? "bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700"
-                                      : "bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800 font-bold"
-                                  }`}
-                                  title="Assign / Reassign Technician"
-                                >
-                                  <option value="">-- Unassigned --</option>
-                                  {deptStaffList
-                                    .filter((s) => !r.departmentId || s.departmentId === r.departmentId)
-                                    .map((s) => (
-                                      <option key={s.id} value={s.id}>
-                                        {s.name}
-                                      </option>
-                                    ))}
-                                </select>
-                              ) : r.assignedStaff ? (
-                                <div className="flex flex-col">
-                                  <span
-                                    className={`font-semibold ${
-                                      isAssignedToMe
-                                        ? "text-indigo-700 dark:text-indigo-300 font-bold"
-                                        : "text-slate-800 dark:text-slate-200"
+                            {showAssignedToCol && (
+                              <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
+                                {canManageDeptOrUniversal ? (
+                                  <select
+                                    value={r.assignedStaffId || r.assignedStaff?.id || ""}
+                                    onChange={(e) => handleQuickAssignTechnician(r.id, e.target.value)}
+                                    className={`text-xs px-2.5 py-1 rounded-lg border max-w-[170px] truncate cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500 font-medium ${
+                                      r.assignedStaffId || r.assignedStaff
+                                        ? "bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700"
+                                        : "bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800 font-bold"
                                     }`}
+                                    title="Assign / Reassign Technician"
                                   >
-                                    {r.assignedStaff.name}
+                                    <option value="">-- Unassigned --</option>
+                                    {deptStaffList
+                                      .filter((s) => !r.departmentId || s.departmentId === r.departmentId)
+                                      .map((s) => (
+                                        <option key={s.id} value={s.id}>
+                                          {s.name}
+                                        </option>
+                                      ))}
+                                  </select>
+                                ) : isAssignedToMe ? (
+                                  <span className="inline-flex items-center text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/70 px-2 py-1 rounded-md border border-indigo-200 dark:border-indigo-900/60 shadow-2xs">
+                                    ★ Assigned to You
                                   </span>
-                                  {isAssignedToMe && (
-                                    <span className="inline-flex items-center text-[9px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/70 px-1.5 py-0.5 rounded border border-indigo-200 dark:border-indigo-900/60 w-fit mt-0.5">
-                                      ★ Assigned to You
-                                    </span>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="inline-flex items-center text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded border border-amber-200 dark:border-amber-900/60">
-                                  Needs Assignment
-                                </span>
-                              )}
-                            </td>
+                                ) : (
+                                  <span className="inline-flex items-center text-[10px] font-bold text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 px-2 py-1 rounded-md border border-amber-200 dark:border-amber-900/60">
+                                    -- Unassigned --
+                                  </span>
+                                )}
+                              </td>
+                            )}
                             <td className="px-5 py-3.5 text-right">
                               <div className="flex items-center justify-end gap-1.5">
                                 <Link
@@ -2457,255 +2211,8 @@ export default function AdminPortalPage() {
         </div>
       )}
 
-      {/* TAB 4: DEPARTMENTS & SLA TIMERS (Overall Admin & Department Heads) */}
-      {activeTab === "departments" && (
-        <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-xs space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
-            <div>
-              <h2 className="text-xl font-bold text-slate-900 dark:text-white">Department Escalation SLA Triggers</h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Service Level Agreement timelines configured per engineering trade.</p>
-            </div>
-            {isDeptAdmin && (
-              <span className="text-xs font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-900/60 px-3 py-1 rounded-xl">
-                Managing: {currentUser?.departmentName}
-              </span>
-            )}
-          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {departments.map((dept) => {
-              const isMyDept = currentUser?.departmentId === dept.id;
-              const canEditThisDept = isLevel1Admin || (isDeptAdmin && isMyDept);
 
-              return (
-                <div
-                  key={dept.id}
-                  className={`p-5 rounded-2xl border transition-all space-y-3 ${isMyDept
-                      ? "border-indigo-300 dark:border-indigo-800 bg-indigo-50/20 dark:bg-indigo-950/20 shadow-xs"
-                      : "border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850/50"
-                    }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-2">
-                      <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200">
-                        {dept.code}
-                      </span>
-                      {isMyDept && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-950/80 text-indigo-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                          ⭐ Your Department
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-900/60">
-                      Active
-                    </span>
-                  </div>
-
-                  <h3 className="font-bold text-base text-slate-900 dark:text-white">{dept.name}</h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">{dept.description}</p>
-
-                  {(dept.leadEmail || dept.leadPhone) && (
-                    <div className="text-[11px] text-slate-600 dark:text-slate-300 pt-1 space-y-0.5 border-t border-slate-100 dark:border-slate-800">
-                      {dept.leadEmail && (
-                        <p className="flex items-center">
-                          <Mail className="w-3 h-3 mr-1 text-slate-400" />
-                          <span>Lead Engineer: <strong>{dept.leadEmail}</strong></span>
-                        </p>
-                      )}
-                      {dept.leadPhone && (
-                        <p className="flex items-center">
-                          <Phone className="w-3 h-3 mr-1 text-slate-400" />
-                          <span>Helpline: <strong>{dept.leadPhone}</strong></span>
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="pt-3 border-t border-slate-200 dark:border-slate-800 grid grid-cols-3 gap-2 text-center text-xs">
-                    <div className="bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-100 dark:border-slate-700 shadow-2xs">
-                      <span className="text-[10px] text-slate-400 dark:text-slate-400 block font-semibold">Tier 1 (AEE)</span>
-                      <span className="font-black text-slate-800 dark:text-slate-100 text-sm">{dept.slaHoursL1} hrs</span>
-                    </div>
-                    <div className="bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-100 dark:border-slate-700 shadow-2xs">
-                      <span className="text-[10px] text-slate-400 dark:text-slate-400 block font-semibold">Tier 2 (EE)</span>
-                      <span className="font-black text-slate-800 dark:text-slate-100 text-sm">{dept.slaHoursL1 * 3} hrs</span>
-                    </div>
-                    <div className="bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-100 dark:border-slate-700 shadow-2xs">
-                      <span className="text-[10px] text-slate-400 dark:text-slate-400 block font-semibold">Tier 3 (SE)</span>
-                      <span className="font-black text-slate-800 dark:text-slate-100 text-sm">{dept.slaHoursL1 * 7} hrs</span>
-                    </div>
-                  </div>
-
-                  {canEditThisDept && (
-                    <div className="pt-2 flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => handleOpenEditDept(dept)}
-                        className="px-3.5 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/70 hover:bg-indigo-600 hover:text-white text-indigo-700 dark:text-indigo-300 font-bold text-xs transition-colors flex items-center space-x-1.5 cursor-pointer border border-indigo-100 dark:border-indigo-900/60"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                        <span>Edit SLAs & Lead Contacts</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* EDIT DEPARTMENT SLA MODAL */}
-      {editingDept && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <form
-            onSubmit={handleSaveDept}
-            className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl p-6 sm:p-8 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4 text-slate-900 dark:text-white"
-          >
-            <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-3">
-              <div>
-                <span className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
-                  {editingDept.code} Department
-                </span>
-                <h3 className="font-bold text-slate-900 dark:text-white text-lg">Configure SLAs & Department Contacts</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setEditingDept(null)}
-                className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 p-1"
-              >
-                ✕
-              </button>
-            </div>
-
-            {deptSaveSuccess && (
-              <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900/60 text-xs font-semibold flex items-center space-x-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                <span>{deptSaveSuccess}</span>
-              </div>
-            )}
-
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Tier 1 (AEE) SLA
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    required
-                    min={1}
-                    max={720}
-                    value={deptForm.slaHoursL1}
-                    onChange={(e) => setDeptForm({ ...deptForm, slaHoursL1: Number(e.target.value) })}
-                    className="w-full text-xs px-3 py-2 pr-7 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  />
-                  <span className="absolute right-2 top-2 text-[10px] text-slate-400 font-bold">hrs</span>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Tier 2 (EE) Trigger
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    required
-                    min={1}
-                    max={720}
-                    value={deptForm.slaHoursL2}
-                    onChange={(e) => setDeptForm({ ...deptForm, slaHoursL2: Number(e.target.value) })}
-                    className="w-full text-xs px-3 py-2 pr-7 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  />
-                  <span className="absolute right-2 top-2 text-[10px] text-slate-400 font-bold">hrs</span>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Tier 3 (SE) Trigger
-                </label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    required
-                    min={1}
-                    max={720}
-                    value={deptForm.slaHoursL3}
-                    onChange={(e) => setDeptForm({ ...deptForm, slaHoursL3: Number(e.target.value) })}
-                    className="w-full text-xs px-3 py-2 pr-7 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                  />
-                  <span className="absolute right-2 top-2 text-[10px] text-slate-400 font-bold">hrs</span>
-                </div>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Department Lead / Engineer Email
-              </label>
-              <input
-                type="email"
-                value={deptForm.leadEmail}
-                onChange={(e) => setDeptForm({ ...deptForm, leadEmail: e.target.value })}
-                placeholder="e.g. aee.electrical@iitgn.ac.in"
-                className="w-full text-xs px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Lead Hotline / Phone Contact
-              </label>
-              <input
-                type="tel"
-                value={deptForm.leadPhone}
-                onChange={(e) => setDeptForm({ ...deptForm, leadPhone: e.target.value })}
-                placeholder="e.g. +91 79 2395 2400"
-                className="w-full text-xs px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                Department Scope Description
-              </label>
-              <textarea
-                rows={2}
-                value={deptForm.description}
-                onChange={(e) => setDeptForm({ ...deptForm, description: e.target.value })}
-                placeholder="Brief scope of works handled by this department..."
-                className="w-full text-xs p-3 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-              />
-            </div>
-
-            <div className="pt-2 flex justify-end space-x-2 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => setEditingDept(null)}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={isSavingDept}
-                className="px-5 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white flex items-center space-x-1 cursor-pointer"
-              >
-                {isSavingDept ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Check className="w-3.5 h-3.5" />
-                )}
-                <span>Save Department SLAs</span>
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {/* TAB 5: COMPLAINT ZONES & CATEGORIES (Overall Admin & Department Heads) */}
       {/* TAB 5: COMPLAINT ZONES & CATEGORIES (Overall Admin & Department Heads) */}
       {activeTab === "categories" && canManageDeptOrUniversal && (
         <div className="space-y-6">
@@ -3279,203 +2786,6 @@ export default function AdminPortalPage() {
         </div>
       )}
 
-      {/* TAB 7: SUPERAPP GLOBAL CALENDAR INTEGRATION */}
-      {activeTab === "calendar" && (
-        <div className="space-y-6">
-          {/* Header Card */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-200 dark:border-slate-800 shadow-xs space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div className="flex items-center space-x-3">
-                <div className="w-12 h-12 rounded-2xl bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-100 dark:border-indigo-900/60 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shadow-2xs">
-                  <Calendar className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
-                    SuperApp Global Calendar Integration (v1)
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Unified campus event hub synchronization for Infrastructure Works Division (IWD)
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={fetchCalendarEvents}
-                  disabled={isLoadingCalendar}
-                  className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isLoadingCalendar ? "animate-spin" : ""}`} />
-                  <span>Refresh Sync</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Status Pills */}
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-2">
-              <div className="p-3 bg-slate-50 dark:bg-slate-800/70 rounded-2xl border border-slate-200 dark:border-slate-700">
-                <span className="text-slate-400 dark:text-slate-500 block font-semibold text-[10px] uppercase">Connection Status</span>
-                <div className="flex items-center gap-1.5 mt-1">
-                  <span
-                    className={`w-2 h-2 rounded-full ${calendarEventsData?.remoteConnected ? "bg-emerald-500 animate-pulse" : "bg-amber-500"
-                      }`}
-                  />
-                  <span className="font-bold text-xs text-slate-800 dark:text-slate-200">
-                    {calendarEventsData?.remoteConnected ? "Live SuperApp Connected" : "Local Standalone / Fallback"}
-                  </span>
-                </div>
-              </div>
-
-              <div className="p-3 bg-slate-50 dark:bg-slate-800/70 rounded-2xl border border-slate-200 dark:border-slate-700">
-                <span className="text-slate-400 dark:text-slate-500 block font-semibold text-[10px] uppercase">Authenticated Module</span>
-                <p className="font-mono font-bold text-xs text-indigo-600 dark:text-indigo-400 mt-1">
-                  {calendarEventsData?.moduleKey || "IWD"} (Works Division)
-                </p>
-              </div>
-
-              <div className="p-3 bg-slate-50 dark:bg-slate-800/70 rounded-2xl border border-slate-200 dark:border-slate-700">
-                <span className="text-slate-400 dark:text-slate-500 block font-semibold text-[10px] uppercase">Auth Mechanism</span>
-                <p className="font-semibold text-xs text-slate-800 dark:text-slate-200 mt-1">
-                  X-Module-Key & Token (Server)
-                </p>
-              </div>
-
-              <div className="p-3 bg-slate-50 dark:bg-slate-800/70 rounded-2xl border border-slate-200 dark:border-slate-700">
-                <span className="text-slate-400 dark:text-slate-500 block font-semibold text-[10px] uppercase">Campus Timezone</span>
-                <p className="font-semibold text-xs text-slate-800 dark:text-slate-200 mt-1">
-                  Asia/Kolkata (IST • UTC+5:30)
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Scheduled Maintenance Visits Table */}
-          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs overflow-hidden">
-            <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
-              <div>
-                <h4 className="text-base font-bold text-slate-900 dark:text-white">
-                  Scheduled Maintenance Dispatches ({calendarEventsData?.scheduledTickets?.length || 0})
-                </h4>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                  Repairs scheduled for field technicians and synchronized to the SuperApp Global Calendar
-                </p>
-              </div>
-            </div>
-
-            {(!calendarEventsData?.scheduledTickets || calendarEventsData.scheduledTickets.length === 0) ? (
-              <div className="p-12 text-center text-xs text-slate-400 dark:text-slate-500">
-                <Calendar className="w-8 h-8 text-slate-300 dark:text-slate-600 mx-auto mb-2" />
-                <p className="font-semibold text-slate-700 dark:text-slate-300">No repair visits scheduled yet</p>
-                <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
-                  Open any complaint ticket in the Complaints Queue and use the SuperApp Global Calendar card to schedule a visit window.
-                </p>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs text-slate-600 dark:text-slate-300">
-                  <thead className="bg-slate-50/70 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 font-bold border-b border-slate-200 dark:border-slate-800">
-                    <tr>
-                      <th className="px-5 py-3.5">Ticket #</th>
-                      <th className="px-4 py-3.5">Scheduled Slot</th>
-                      <th className="px-4 py-3.5">Subject & Location</th>
-                      <th className="px-4 py-3.5">Assigned Technician</th>
-                      <th className="px-4 py-3.5">SuperApp Event ID</th>
-                      <th className="px-5 py-3.5 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
-                    {calendarEventsData.scheduledTickets.map((t: any) => (
-                      <tr key={t.id} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/50 transition-colors">
-                        <td className="px-5 py-3.5 font-mono font-bold text-indigo-600 dark:text-indigo-400">
-                          {t.ticketNumber}
-                        </td>
-                        <td className="px-4 py-3.5">
-                          <p className="font-bold text-slate-900 dark:text-white">
-                            {new Date(t.scheduledStartAt).toLocaleDateString("en-IN", {
-                              weekday: "short",
-                              day: "numeric",
-                              month: "short",
-                            })}
-                          </p>
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                            {new Date(t.scheduledStartAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
-                            {t.scheduledEndAt && ` - ${new Date(t.scheduledEndAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`}
-                          </p>
-                        </td>
-                        <td className="px-4 py-3.5 max-w-xs">
-                          <p className="font-bold text-slate-900 dark:text-white truncate">{t.subject}</p>
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">{t.locationDetail}</p>
-                        </td>
-                        <td className="px-4 py-3.5 text-slate-700 dark:text-slate-300">
-                          {t.assignedStaff?.name || <span className="text-slate-400 dark:text-slate-500 italic">Unassigned</span>}
-                        </td>
-                        <td className="px-4 py-3.5">
-                          <span className="font-mono text-[11px] px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-900/60 font-semibold">
-                            {t.calendarEventId || "Local"}
-                          </span>
-                        </td>
-                        <td className="px-5 py-3.5 text-right">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const found = requests.find((r) => r.id === t.id);
-                              if (found) openRequestDrawer(found);
-                            }}
-                            className="px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/70 hover:bg-indigo-600 hover:text-white text-indigo-700 dark:text-indigo-300 font-semibold text-xs transition-colors cursor-pointer border border-indigo-200 dark:border-indigo-900/60"
-                          >
-                            Manage Visit
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {/* SuperApp API Contract Reference Card */}
-          <div className="bg-slate-900 text-slate-200 rounded-3xl p-6 border border-slate-800 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                <h4 className="text-sm font-bold text-white uppercase tracking-wider">
-                  SuperApp Global Calendar API v1 Contract Specifications
-                </h4>
-              </div>
-              <span className="text-[10px] font-mono bg-slate-800 px-2 py-0.5 rounded text-indigo-300">
-                100% Implemented & Compliant
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-              <div className="space-y-2">
-                <p className="font-semibold text-indigo-300">Registered Endpoints:</p>
-                <ul className="space-y-1 font-mono text-[11px] text-slate-300">
-                  <li>• GET /api/v1/calendar/events (List / filter events)</li>
-                  <li>• GET /api/v1/calendar/events/&#123;id&#125; (Fetch event)</li>
-                  <li>• POST /api/v1/calendar/events (Create event)</li>
-                  <li>• PATCH /api/v1/calendar/events/&#123;id&#125; (Update event)</li>
-                  <li>• DELETE /api/v1/calendar/events/&#123;id&#125; (Cancel / soft delete)</li>
-                  <li>• GET /health (Health check)</li>
-                </ul>
-              </div>
-
-              <div className="space-y-2">
-                <p className="font-semibold text-indigo-300">Integration Constraints Enforced:</p>
-                <ul className="space-y-1 text-[11px] text-slate-300">
-                  <li>• <strong>Authentication:</strong> Backend sends <code className="text-indigo-200">X-Module-Key</code> and <code className="text-indigo-200">X-Module-Token</code> headers; tokens never exposed to client.</li>
-                  <li>• <strong>Traceability:</strong> Every request generates and passes <code className="text-indigo-200">X-Request-Id</code> for error diagnostics.</li>
-                  <li>• <strong>Timestamps:</strong> Valid ISO-8601 with seconds & explicit timezone (<code className="text-indigo-200">Asia/Kolkata</code>); validates <code className="text-indigo-200">endAt &gt; startAt</code>.</li>
-                  <li>• <strong>Ownership & Privacy:</strong> No forbidden <code className="text-indigo-200">moduleKey</code> in payload bodies; sanitizes confidential resident phone numbers.</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* SELECTED REQUEST MANAGE DRAWER / MODAL */}
       {selectedRequest && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 md:p-6">
@@ -3628,18 +2938,9 @@ export default function AdminPortalPage() {
                   <button
                     onClick={() => handleUpdateStatus("RESOLVED")}
                     disabled={isUpdatingAction}
-                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer"
+                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs cursor-pointer shadow-xs"
                   >
                     Mark Resolved
-                  </button>
-                )}
-                {selectedRequest.status !== "CLOSED" && (
-                  <button
-                    onClick={() => handleUpdateStatus("CLOSED")}
-                    disabled={isUpdatingAction}
-                    className="px-3 py-1.5 rounded-lg bg-slate-800 dark:bg-slate-700 hover:bg-slate-900 dark:hover:bg-slate-600 text-white font-bold text-xs cursor-pointer border border-slate-700"
-                  >
-                    Close (3-Day Grace)
                   </button>
                 )}
 
@@ -3915,132 +3216,22 @@ export default function AdminPortalPage() {
             ) : (
               <div className="bg-slate-50 dark:bg-slate-800/80 rounded-xl p-3.5 sm:p-4 border border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs">
                 <div>
-                  <span className="font-bold text-slate-600 dark:text-slate-400 block text-[11px]">Assigned Technician:</span>
+                  <span className="font-bold text-slate-600 dark:text-slate-400 block text-[11px]">Assignment Status:</span>
                   <span className="font-semibold text-slate-900 dark:text-white mt-0.5 inline-block">
-                    {selectedRequest.assignedStaff?.name || "Unassigned / General Department Queue"}
+                    {selectedRequest.assignedStaffId === currentUser?.id ? "Assigned to You" : "Unassigned (Open Department Pool)"}
                   </span>
                 </div>
-                {selectedRequest.assignedStaffId === currentUser?.id && (
-                  <span className="px-2 py-1 rounded bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 font-bold text-[10px] border border-indigo-200 dark:border-indigo-900/60">
+                {selectedRequest.assignedStaffId === currentUser?.id ? (
+                  <span className="px-2 py-1 rounded bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 font-bold text-[10px] border border-indigo-200 dark:border-indigo-900/60 shadow-2xs">
                     ★ Assigned to You
+                  </span>
+                ) : (
+                  <span className="px-2 py-1 rounded bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-400 font-bold text-[10px] border border-amber-200 dark:border-amber-900/60">
+                    -- Unassigned --
                   </span>
                 )}
               </div>
             )}
-
-            {/* SuperApp Global Calendar Scheduling Card */}
-            <div className="bg-slate-50/90 dark:bg-slate-800/80 rounded-xl p-3.5 sm:p-4 border border-slate-200 dark:border-slate-700 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <Calendar className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                    SuperApp Global Calendar Schedule
-                  </h4>
-                </div>
-                {selectedRequest.calendarEventId ? (
-                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900/50">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 dark:bg-emerald-400 animate-pulse" />
-                    Synced: Event #{selectedRequest.calendarEventId.slice(-6)}
-                  </span>
-                ) : (
-                  <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 bg-slate-200/60 dark:bg-slate-700/60 px-2 py-0.5 rounded-md">
-                    Not scheduled on Global Calendar
-                  </span>
-                )}
-              </div>
-
-              {calendarSyncFeedback && (
-                <div
-                  className={`p-3 rounded-xl text-xs font-medium border flex items-center justify-between ${calendarSyncFeedback.type === "success"
-                      ? "bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/60"
-                      : "bg-rose-50 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border-rose-200 dark:border-rose-900/60"
-                    }`}
-                >
-                  <span>{calendarSyncFeedback.message}</span>
-                  <button
-                    onClick={() => setCalendarSyncFeedback(null)}
-                    className="text-xs font-bold px-1 hover:opacity-70 cursor-pointer"
-                  >
-                    ✕
-                  </button>
-                </div>
-              )}
-
-              {selectedRequest.scheduledStartAt ? (
-                <div className="bg-white dark:bg-slate-800 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500 dark:text-slate-400 font-semibold">Scheduled Appointment:</span>
-                    <span className="font-bold text-slate-800 dark:text-slate-200 font-mono">
-                      {new Date(selectedRequest.scheduledStartAt).toLocaleDateString("en-IN", {
-                        weekday: "short",
-                        day: "numeric",
-                        month: "short",
-                        year: "numeric",
-                      })}{" "}
-                      • {new Date(selectedRequest.scheduledStartAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
-                      {selectedRequest.scheduledEndAt && ` - ${new Date(selectedRequest.scheduledEndAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-700">
-                    <span className="text-[11px] text-slate-400 dark:text-slate-500">
-                      Module: <strong className="text-slate-600 dark:text-slate-300">IWD</strong> • Auto-synced with SuperApp
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleCancelCalendarSchedule}
-                      disabled={isSchedulingCalendar}
-                      className="px-3 py-1 bg-rose-50 dark:bg-rose-950/60 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 font-bold text-xs rounded-lg border border-rose-200 dark:border-rose-900/60 transition-colors cursor-pointer"
-                    >
-                      {isSchedulingCalendar ? "Cancelling..." : "Cancel Calendar Event"}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
-                    Publish this repair dispatch to the campus-wide <strong>SuperApp Global Calendar (v1)</strong> so residents and department heads see the scheduled visit window.
-                  </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">Visit Date</label>
-                      <input
-                        type="date"
-                        value={scheduleDate}
-                        onChange={(e) => setScheduleDate(e.target.value)}
-                        className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">Start Time</label>
-                      <input
-                        type="time"
-                        value={scheduleStartTime}
-                        onChange={(e) => setScheduleStartTime(e.target.value)}
-                        className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-600 dark:text-slate-300 mb-1">End Time</label>
-                      <input
-                        type="time"
-                        value={scheduleEndTime}
-                        onChange={(e) => setScheduleEndTime(e.target.value)}
-                        className="w-full px-2.5 py-1.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs"
-                      />
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleScheduleOnCalendar}
-                    disabled={isSchedulingCalendar || !scheduleDate}
-                    className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <Calendar className="w-3.5 h-3.5" />
-                    <span>{isSchedulingCalendar ? "Syncing to SuperApp..." : "Sync Repair Window to Global Calendar"}</span>
-                  </button>
-                </div>
-              )}
-            </div>
 
             {/* Fault Description & Location Details */}
             <div className="bg-slate-50/80 dark:bg-slate-800/80 rounded-xl p-3.5 sm:p-4 border border-slate-200 dark:border-slate-700 space-y-3">
