@@ -250,6 +250,10 @@ export default function AdminPortalPage() {
   // Department staff for assignments
   const [deptStaffList, setDeptStaffList] = useState<any[]>([]);
 
+  // Staff unassigned visibility toggle & queue filter
+  const [allowStaffViewUnassigned, setAllowStaffViewUnassigned] = useState(true);
+  const [unassignedOnlyFilter, setUnassignedOnlyFilter] = useState(false);
+
   // Roles Schema State
   const [roles, setRoles] = useState<any[]>([]);
   const [allPermissions, setAllPermissions] = useState<any[]>([]);
@@ -629,6 +633,134 @@ export default function AdminPortalPage() {
       alert(e.message || "Failed to save permissions.");
     } finally {
       setIsSavingRole(false);
+    }
+  };
+
+  // Fetch Staff Visibility Settings
+  useEffect(() => {
+    fetch("/api/admin/settings")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.settings) {
+          setAllowStaffViewUnassigned(data.settings.allowStaffViewUnassigned !== false);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Toggle whether field staff can view unassigned pool tasks
+  const handleToggleStaffViewUnassigned = async () => {
+    const nextVal = !allowStaffViewUnassigned;
+    setAllowStaffViewUnassigned(nextVal);
+    try {
+      const res = await fetch("/api/admin/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "allow_staff_view_unassigned", value: String(nextVal) }),
+      });
+      const data = await res.json();
+      if (!data.success) {
+        setAllowStaffViewUnassigned(!nextVal);
+        alert(data.error || "Failed to update setting");
+      }
+    } catch (e) {
+      setAllowStaffViewUnassigned(!nextVal);
+    }
+  };
+
+  // Change Complaint Priority on the fly from Complaints Queue table
+  const handlePriorityChange = async (requestId: string, newPriority: string) => {
+    try {
+      const res = await fetch(`/api/requests/${requestId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ priority: newPriority }),
+      });
+      const data = await res.json();
+      if (data.success && data.request) {
+        setRequests((prev) =>
+          prev.map((item) =>
+            item.id === requestId
+              ? {
+                  ...item,
+                  priority: newPriority,
+                  isUrgent: newPriority === "HIGH" || newPriority === "EMERGENCY",
+                }
+              : item
+          )
+        );
+        if (selectedRequest && selectedRequest.id === requestId) {
+          setSelectedRequest((prev: any) => ({
+            ...prev,
+            priority: newPriority,
+            isUrgent: newPriority === "HIGH" || newPriority === "EMERGENCY",
+          }));
+        }
+      } else {
+        alert(data.error || "Failed to update priority");
+      }
+    } catch (e) {
+      console.error("Priority update error:", e);
+    }
+  };
+
+  // Quick Technician Assignment from Table
+  const handleQuickAssignTechnician = async (requestId: string, staffId: string) => {
+    try {
+      const res = await fetch(`/api/requests/${requestId}/assign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ staffId: staffId || null }),
+      });
+      const data = await res.json();
+      if (data.success && data.request) {
+        setRequests((prev) =>
+          prev.map((item) => (item.id === requestId ? { ...item, ...data.request } : item))
+        );
+        if (selectedRequest && selectedRequest.id === requestId) {
+          setSelectedRequest((prev: any) => ({
+            ...prev,
+            ...data.request,
+          }));
+        }
+      } else {
+        alert(data.error || "Failed to assign technician");
+      }
+    } catch (e) {
+      console.error("Assign error:", e);
+    }
+  };
+
+  // Escalate Complaint from Admin/Staff console
+  const handleStaffEscalate = async (requestId: string) => {
+    const reason = prompt(
+      "Enter reason for escalation (e.g. requires specialized vendor, structural repairs, or senior engineer intervention):"
+    );
+    if (!reason || !reason.trim()) return;
+
+    setIsUpdatingAction(true);
+    try {
+      const res = await fetch(`/api/requests/${requestId}/escalate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: reason.trim() }),
+      });
+      const data = await res.json();
+      if (data.success && data.request) {
+        alert(`Complaint successfully escalated to ${data.message || `Tier ${data.escalationLevel}`}`);
+        setRequests((prev) =>
+          prev.map((item) => (item.id === requestId ? { ...item, ...data.request } : item))
+        );
+        if (selectedRequest && selectedRequest.id === requestId) {
+          setSelectedRequest(data.request);
+        }
+      } else {
+        alert(data.error || "Failed to escalate ticket.");
+      }
+    } catch (e) {
+      console.error("Staff escalation error:", e);
+    } finally {
+      setIsUpdatingAction(false);
     }
   };
 
@@ -1232,10 +1364,14 @@ export default function AdminPortalPage() {
   const isDeptStaff = currentUser?.roleLevel === 3 || currentUser?.roleCode === "DEPT_STAFF";
   const canManageDeptOrUniversal = isLevel1Admin || isDeptAdmin;
 
-  // Multi-tier operational queue sorting
+  // Multi-tier operational queue sorting with optional unassigned-only view
   const sortedRequests = useMemo(() => {
-    return sortComplaintsByOperationalPriority(requests, currentUser);
-  }, [requests, currentUser]);
+    let list = requests;
+    if (unassignedOnlyFilter) {
+      list = list.filter((r) => !r.assignedStaffId && !r.assignedStaff && r.status !== "CLOSED" && r.status !== "RESOLVED");
+    }
+    return sortComplaintsByOperationalPriority(list, currentUser);
+  }, [requests, currentUser, unassignedOnlyFilter]);
 
   if (isSessionLoading) {
     return (
@@ -1647,6 +1783,43 @@ export default function AdminPortalPage() {
                 <option value="EMERGENCY">Emergency</option>
               </select>
 
+              {/* Unassigned Tasks Quick Filter (Admins) */}
+              {canManageDeptOrUniversal && (
+                <button
+                  type="button"
+                  onClick={() => setUnassignedOnlyFilter(!unassignedOnlyFilter)}
+                  className={`text-xs px-3 py-2 rounded-xl border font-semibold transition-all cursor-pointer ${
+                    unassignedOnlyFilter
+                      ? "bg-amber-500 text-slate-950 border-amber-400 font-bold shadow-xs"
+                      : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700"
+                  }`}
+                  title="Toggle queue to show only unassigned tickets"
+                >
+                  <span>{unassignedOnlyFilter ? "Showing: Unassigned Only" : "Filter: All Work Orders"}</span>
+                </button>
+              )}
+
+              {/* Admin Policy Toggle: Allow Field Staff to View Unassigned Tasks */}
+              {canManageDeptOrUniversal && (
+                <button
+                  type="button"
+                  onClick={handleToggleStaffViewUnassigned}
+                  className={`text-xs px-3 py-2 rounded-xl border flex items-center gap-1.5 font-semibold transition-all cursor-pointer ${
+                    allowStaffViewUnassigned
+                      ? "bg-indigo-50 dark:bg-indigo-950/70 border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300"
+                      : "bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400"
+                  }`}
+                  title="Controls whether technicians can see unassigned domain tasks or exclusively their own assigned tasks"
+                >
+                  {allowStaffViewUnassigned ? (
+                    <ToggleRight className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                  ) : (
+                    <ToggleLeft className="w-4 h-4 text-slate-400" />
+                  )}
+                  <span>Staff View Unassigned: <strong>{allowStaffViewUnassigned ? "ON" : "OFF"}</strong></span>
+                </button>
+              )}
+
               <button
                 onClick={fetchRequests}
                 className="p-2 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors"
@@ -1706,17 +1879,35 @@ export default function AdminPortalPage() {
                               </span>
                             )}
                           </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <span
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${r.priority === "EMERGENCY"
-                                ? "bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50"
-                                : r.priority === "HIGH"
-                                  ? "bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-900/50"
-                                  : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
+                          <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                            {canManageDeptOrUniversal ? (
+                              <select
+                                value={r.priority}
+                                onChange={(e) => handlePriorityChange(r.id, e.target.value)}
+                                className={`text-[10px] font-bold px-1.5 py-0.5 rounded border cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500 ${
+                                  r.priority === "EMERGENCY"
+                                    ? "bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800"
+                                    : r.priority === "HIGH"
+                                      ? "bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800"
+                                      : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700"
                                 }`}
-                            >
-                              {r.priority}
-                            </span>
+                              >
+                                <option value="NORMAL">NORMAL</option>
+                                <option value="HIGH">HIGH</option>
+                                <option value="EMERGENCY">EMERGENCY</option>
+                              </select>
+                            ) : (
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold ${r.priority === "EMERGENCY"
+                                  ? "bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50"
+                                  : r.priority === "HIGH"
+                                    ? "bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-900/50"
+                                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
+                                  }`}
+                              >
+                                {r.priority}
+                              </span>
+                            )}
                             <span
                               className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${r.status === "RESOLVED" || r.status === "CLOSED"
                                 ? "bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900/50"
@@ -1767,7 +1958,27 @@ export default function AdminPortalPage() {
                                 {r.attachments?.length || r._count?.attachments}
                               </span>
                             )}
-                            {r.assignedStaff ? (
+                            {canManageDeptOrUniversal ? (
+                              <select
+                                value={r.assignedStaffId || r.assignedStaff?.id || ""}
+                                onChange={(e) => handleQuickAssignTechnician(r.id, e.target.value)}
+                                onClick={(e) => e.stopPropagation()}
+                                className={`text-[10px] font-medium px-2 py-0.5 rounded border max-w-[130px] truncate cursor-pointer ${
+                                  r.assignedStaffId || r.assignedStaff
+                                    ? "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700"
+                                    : "bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800 font-bold"
+                                }`}
+                              >
+                                <option value="">-- Assign Tech --</option>
+                                {deptStaffList
+                                  .filter((s) => !r.departmentId || s.departmentId === r.departmentId)
+                                  .map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                      {s.name}
+                                    </option>
+                                  ))}
+                              </select>
+                            ) : r.assignedStaff ? (
                               <span
                                 className={`text-[10px] font-medium ${
                                   isAssignedToMe
@@ -1886,17 +2097,36 @@ export default function AdminPortalPage() {
                               <p className="text-slate-800 dark:text-slate-200 font-semibold">{r.requesterName}</p>
                               <p className="text-[10px] text-slate-400 dark:text-slate-500">{r.requesterPhone}</p>
                             </td>
-                            <td className="px-4 py-3.5">
-                              <span
-                                className={`px-2 py-0.5 rounded text-[10px] font-bold ${r.priority === "EMERGENCY"
-                                  ? "bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50"
-                                  : r.priority === "HIGH"
-                                    ? "bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-900/50"
-                                    : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
+                            <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
+                              {canManageDeptOrUniversal ? (
+                                <select
+                                  value={r.priority}
+                                  onChange={(e) => handlePriorityChange(r.id, e.target.value)}
+                                  className={`px-2 py-1 rounded text-[10px] font-bold border cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-colors ${
+                                    r.priority === "EMERGENCY"
+                                      ? "bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800"
+                                      : r.priority === "HIGH"
+                                        ? "bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800"
+                                        : "bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700"
                                   }`}
-                              >
-                                {r.priority}
-                              </span>
+                                  title="Change Priority (Admins)"
+                                >
+                                  <option value="NORMAL">NORMAL</option>
+                                  <option value="HIGH">HIGH</option>
+                                  <option value="EMERGENCY">EMERGENCY</option>
+                                </select>
+                              ) : (
+                                <span
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold ${r.priority === "EMERGENCY"
+                                    ? "bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50"
+                                    : r.priority === "HIGH"
+                                      ? "bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-900/50"
+                                      : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
+                                    }`}
+                                >
+                                  {r.priority}
+                                </span>
+                              )}
                             </td>
                             <td className="px-4 py-3.5">
                               <div className="flex flex-col">
@@ -1919,8 +2149,28 @@ export default function AdminPortalPage() {
                                 )}
                               </div>
                             </td>
-                            <td className="px-4 py-3.5">
-                              {r.assignedStaff ? (
+                            <td className="px-4 py-3.5" onClick={(e) => e.stopPropagation()}>
+                              {canManageDeptOrUniversal ? (
+                                <select
+                                  value={r.assignedStaffId || r.assignedStaff?.id || ""}
+                                  onChange={(e) => handleQuickAssignTechnician(r.id, e.target.value)}
+                                  className={`text-xs px-2.5 py-1 rounded-lg border max-w-[170px] truncate cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500 font-medium ${
+                                    r.assignedStaffId || r.assignedStaff
+                                      ? "bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700"
+                                      : "bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border-amber-300 dark:border-amber-800 font-bold"
+                                  }`}
+                                  title="Assign / Reassign Technician"
+                                >
+                                  <option value="">-- Unassigned --</option>
+                                  {deptStaffList
+                                    .filter((s) => !r.departmentId || s.departmentId === r.departmentId)
+                                    .map((s) => (
+                                      <option key={s.id} value={s.id}>
+                                        {s.name}
+                                      </option>
+                                    ))}
+                                </select>
+                              ) : r.assignedStaff ? (
                                 <div className="flex flex-col">
                                   <span
                                     className={`font-semibold ${
@@ -3296,7 +3546,7 @@ export default function AdminPortalPage() {
 
             {/* Quick Status Bar */}
             <div className="p-3 sm:p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 flex flex-wrap gap-2 items-center justify-between">
-              <div className="flex items-center space-x-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-slate-500 dark:text-slate-400 font-semibold">Current Status:</span>
                 <span
                   className={`font-bold text-xs px-2.5 py-0.5 rounded-full ${selectedRequest.status === "RESOLVED" || selectedRequest.status === "CLOSED"
@@ -3308,14 +3558,54 @@ export default function AdminPortalPage() {
                 >
                   {selectedRequest.status}
                 </span>
+
+                {/* Priority Selector for Admins / Badge for Staff */}
+                {canManageDeptOrUniversal ? (
+                  <div className="flex items-center gap-1.5 ml-1">
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400 font-medium">Priority:</span>
+                    <select
+                      value={selectedRequest.priority}
+                      onChange={(e) => handlePriorityChange(selectedRequest.id, e.target.value)}
+                      className={`text-xs font-bold px-2 py-0.5 rounded border cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500 ${
+                        selectedRequest.priority === "EMERGENCY"
+                          ? "bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800"
+                          : selectedRequest.priority === "HIGH"
+                            ? "bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800"
+                            : "bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700"
+                      }`}
+                    >
+                      <option value="NORMAL">NORMAL</option>
+                      <option value="HIGH">HIGH</option>
+                      <option value="EMERGENCY">EMERGENCY</option>
+                    </select>
+                  </div>
+                ) : (
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold ml-1 ${
+                      selectedRequest.priority === "EMERGENCY"
+                        ? "bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50"
+                        : selectedRequest.priority === "HIGH"
+                          ? "bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-900/50"
+                          : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700"
+                    }`}
+                  >
+                    Priority: {selectedRequest.priority}
+                  </span>
+                )}
+
                 {selectedRequest.reopenCount > 0 && (
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-rose-50 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/50">
                     Reopened {selectedRequest.reopenCount}x
                   </span>
                 )}
+                {selectedRequest.escalationLevel > 0 && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-900/50">
+                    Tier {selectedRequest.escalationLevel} Escalated
+                  </span>
+                )}
               </div>
 
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap gap-1.5 items-center">
                 {selectedRequest.status !== "ACKNOWLEDGED" && (
                   <button
                     onClick={() => handleUpdateStatus("ACKNOWLEDGED")}
@@ -3350,6 +3640,20 @@ export default function AdminPortalPage() {
                     className="px-3 py-1.5 rounded-lg bg-slate-800 dark:bg-slate-700 hover:bg-slate-900 dark:hover:bg-slate-600 text-white font-bold text-xs cursor-pointer border border-slate-700"
                   >
                     Close (3-Day Grace)
+                  </button>
+                )}
+
+                {/* Escalate Matter Button for Staff and Admins */}
+                {selectedRequest.status !== "CLOSED" && (
+                  <button
+                    type="button"
+                    onClick={() => handleStaffEscalate(selectedRequest.id)}
+                    disabled={isUpdatingAction || selectedRequest.escalationLevel >= 3}
+                    className="px-3 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800 font-bold text-xs flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    title={selectedRequest.escalationLevel >= 3 ? "Maximum escalation tier reached" : "Escalate to Senior Engineer / Directorate"}
+                  >
+                    <ArrowUpRight className="w-3.5 h-3.5" />
+                    <span>Escalate {selectedRequest.escalationLevel > 0 ? `(Tier ${selectedRequest.escalationLevel + 1})` : "Matter"}</span>
                   </button>
                 )}
               </div>
@@ -3578,35 +3882,51 @@ export default function AdminPortalPage() {
               </form>
             </div>
 
-            {/* Technician Assignment */}
-            <div className="bg-slate-50 dark:bg-slate-800/80 rounded-xl p-3.5 sm:p-4 border border-slate-200 dark:border-slate-700 space-y-3">
-              <label className="block text-xs font-bold text-slate-900 dark:text-white">
-                Assign / Reassign Technician
-              </label>
-              <div className="flex gap-2">
-                <select
-                  value={selectedTechnicianId || selectedRequest.assignedStaffId || ""}
-                  onChange={(e) => setSelectedTechnicianId(e.target.value)}
-                  className="w-full text-xs px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                >
-                  <option value="">-- Choose Field Technician --</option>
-                  {deptStaffList
-                    .filter((s) => !selectedRequest.departmentId || s.departmentId === selectedRequest.departmentId)
-                    .map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} ({s.department?.name})
-                      </option>
-                    ))}
-                </select>
-                <button
-                  onClick={handleAssignTechnician}
-                  disabled={isUpdatingAction}
-                  className="px-4 py-2 bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 dark:hover:bg-slate-600 text-white font-bold text-xs rounded-xl shrink-0 cursor-pointer border border-slate-700"
-                >
-                  Assign
-                </button>
+            {/* Technician Assignment (Admins Only - Staff cannot assign work) */}
+            {canManageDeptOrUniversal ? (
+              <div className="bg-slate-50 dark:bg-slate-800/80 rounded-xl p-3.5 sm:p-4 border border-slate-200 dark:border-slate-700 space-y-3">
+                <label className="block text-xs font-bold text-slate-900 dark:text-white">
+                  Assign / Reassign Technician
+                </label>
+                <div className="flex gap-2">
+                  <select
+                    value={selectedTechnicianId || selectedRequest.assignedStaffId || ""}
+                    onChange={(e) => setSelectedTechnicianId(e.target.value)}
+                    className="w-full text-xs px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                  >
+                    <option value="">-- Choose Field Technician --</option>
+                    {deptStaffList
+                      .filter((s) => !selectedRequest.departmentId || s.departmentId === selectedRequest.departmentId)
+                      .map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} ({s.department?.name})
+                        </option>
+                      ))}
+                  </select>
+                  <button
+                    onClick={handleAssignTechnician}
+                    disabled={isUpdatingAction}
+                    className="px-4 py-2 bg-slate-900 dark:bg-slate-700 hover:bg-slate-800 dark:hover:bg-slate-600 text-white font-bold text-xs rounded-xl shrink-0 cursor-pointer border border-slate-700"
+                  >
+                    Assign
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="bg-slate-50 dark:bg-slate-800/80 rounded-xl p-3.5 sm:p-4 border border-slate-200 dark:border-slate-700 flex items-center justify-between text-xs">
+                <div>
+                  <span className="font-bold text-slate-600 dark:text-slate-400 block text-[11px]">Assigned Technician:</span>
+                  <span className="font-semibold text-slate-900 dark:text-white mt-0.5 inline-block">
+                    {selectedRequest.assignedStaff?.name || "Unassigned / General Department Queue"}
+                  </span>
+                </div>
+                {selectedRequest.assignedStaffId === currentUser?.id && (
+                  <span className="px-2 py-1 rounded bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 font-bold text-[10px] border border-indigo-200 dark:border-indigo-900/60">
+                    ★ Assigned to You
+                  </span>
+                )}
+              </div>
+            )}
 
             {/* SuperApp Global Calendar Scheduling Card */}
             <div className="bg-slate-50/90 dark:bg-slate-800/80 rounded-xl p-3.5 sm:p-4 border border-slate-200 dark:border-slate-700 space-y-3">

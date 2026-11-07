@@ -2090,26 +2090,67 @@ function SingleTicketTrackContent() {
                 : `Active: Tier ${request.escalationLevel}`}
             </span>
 
-            {request.status !== "RESOLVED" && request.status !== "CLOSED" && request.escalationLevel < 3 && (
-              <button
-                type="button"
-                onClick={handleEscalate}
-                disabled={isEscalating}
-                className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs transition-colors shadow-xs flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
-              >
-                {isEscalating ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Escalating...</span>
-                  </>
-                ) : (
-                  <>
-                    <AlertTriangle className="w-3.5 h-3.5" />
-                    <span>Escalate to Tier {request.escalationLevel + 1}</span>
-                  </>
-                )}
-              </button>
-            )}
+            {(() => {
+              const isStaffOrAdminViewer = Boolean(
+                currentUser &&
+                (currentUser.roleLevel <= 3 ||
+                  currentUser.roleCode === "OVERALL_ADMIN" ||
+                  currentUser.roleCode === "DEPT_ADMIN" ||
+                  currentUser.roleCode === "DEPT_STAFF")
+              );
+
+              const isResolvedVerificationActive = Boolean(
+                request.status === "RESOLVED" &&
+                (() => {
+                  const refTime = request.resolvedAt || request.updatedAt;
+                  if (!refTime) return true;
+                  return Date.now() - new Date(refTime).getTime() <= 3 * 24 * 60 * 60 * 1000;
+                })()
+              );
+
+              const canEscalateNow =
+                request.escalationLevel < 3 &&
+                request.status !== "CLOSED" &&
+                !request.isArchived &&
+                (isStaffOrAdminViewer || isResolvedVerificationActive);
+
+              if (canEscalateNow) {
+                return (
+                  <button
+                    type="button"
+                    onClick={handleEscalate}
+                    disabled={isEscalating}
+                    className="px-3.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs transition-colors shadow-xs flex items-center space-x-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    {isEscalating ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Escalating...</span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertTriangle className="w-3.5 h-3.5" />
+                        <span>
+                          {isStaffOrAdminViewer
+                            ? `Staff Escalation: Tier ${request.escalationLevel + 1}`
+                            : `Issue Persists? Escalate to Tier ${request.escalationLevel + 1}`}
+                        </span>
+                      </>
+                    )}
+                  </button>
+                );
+              }
+
+              if (request.status !== "RESOLVED" && request.status !== "CLOSED" && !isStaffOrAdminViewer) {
+                return (
+                  <span className="text-[11px] text-slate-400 bg-slate-800/80 px-2.5 py-1 rounded-full border border-slate-700 font-medium">
+                    Attending by department technician
+                  </span>
+                );
+              }
+
+              return null;
+            })()}
           </div>
         </div>
 

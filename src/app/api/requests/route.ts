@@ -55,8 +55,33 @@ export async function GET(req: NextRequest) {
       whereClause.requesterPhone = cleanPhone;
     } else {
       // Authenticated Staff: Check Role and Department scoping
-      const deptFilter = buildDepartmentFilter(currentUser, departmentId || undefined);
-      whereClause = { ...whereClause, ...deptFilter };
+      const isFieldStaff = currentUser.roleCode === "DEPT_STAFF" || currentUser.roleLevel === 3;
+      if (isFieldStaff) {
+        // Enforce technician scoping: Technicians never see each other's assigned tasks.
+        // Admins control whether technicians can also view unassigned pool tasks.
+        const setting = await prisma.systemSetting.findUnique({
+          where: { key: "allow_staff_view_unassigned" },
+        });
+        const allowUnassigned = setting ? setting.value !== "false" : true;
+
+        whereClause.departmentId = currentUser.departmentId || "NO_DEPT_ASSIGNED";
+        if (allowUnassigned) {
+          whereClause.AND = [
+            ...(whereClause.AND || []),
+            {
+              OR: [
+                { assignedStaffId: currentUser.id },
+                { assignedStaffId: null },
+              ],
+            },
+          ];
+        } else {
+          whereClause.assignedStaffId = currentUser.id;
+        }
+      } else {
+        const deptFilter = buildDepartmentFilter(currentUser, departmentId || undefined);
+        whereClause = { ...whereClause, ...deptFilter };
+      }
     }
 
     // Additional filters
@@ -71,13 +96,14 @@ export async function GET(req: NextRequest) {
     }
     if (search && search.trim() !== "") {
       const q = search.trim();
-      whereClause.OR = [
+      const searchOr = [
         { ticketNumber: { contains: q } },
         { subject: { contains: q } },
         { requesterName: { contains: q } },
         { locationDetail: { contains: q } },
         { description: { contains: q } },
       ];
+      whereClause.AND = [...(whereClause.AND || []), { OR: searchOr }];
     }
 
     const requests = await prisma.maintenanceRequest.findMany({
@@ -240,8 +266,8 @@ export async function POST(req: NextRequest) {
         availability: availability || "Anytime during working hours",
         subject: subject.trim(),
         description: description ? description.trim() : subject.trim(),
-        priority: isUrgent ? "HIGH" : priority,
-        isUrgent: Boolean(isUrgent),
+        priority: "NORMAL",
+        isUrgent: false,
         status: "SUBMITTED",
       },
     });

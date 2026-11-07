@@ -200,7 +200,7 @@ export async function PATCH(
   { params }: { params: { id: string } }
 ) {
   try {
-    const { token, sharePhoneWithStaff, requesterPhone } = await req.json();
+    const { token, sharePhoneWithStaff, requesterPhone, priority } = await req.json();
     const identifier = params.id;
 
     const request = await prisma.maintenanceRequest.findFirst({
@@ -230,6 +230,8 @@ export async function PATCH(
     const updateData: {
       sharePhoneWithStaff?: boolean;
       requesterPhone?: string | null;
+      priority?: string;
+      isUrgent?: boolean;
     } = {};
 
     if (typeof sharePhoneWithStaff === "boolean") {
@@ -244,18 +246,65 @@ export async function PATCH(
       }
     }
 
+    // Priority Change: Restricted to Overall Admin (Level 1) and Department Admin (Level 2)
+    if (priority !== undefined) {
+      const canSetPriority =
+        currentUser &&
+        (currentUser.roleLevel === 1 ||
+          currentUser.roleCode === "OVERALL_ADMIN" ||
+          (currentUser.roleLevel === 2 && canAccessDepartment(currentUser, request.departmentId)));
+
+      if (!canSetPriority) {
+        return NextResponse.json(
+          { success: false, error: "Forbidden: Only Overall Admin and Department Admins can change priority." },
+          { status: 403 }
+        );
+      }
+
+      if (!["NORMAL", "HIGH", "EMERGENCY"].includes(priority)) {
+        return NextResponse.json({ success: false, error: "Invalid priority level." }, { status: 400 });
+      }
+
+      updateData.priority = priority;
+      updateData.isUrgent = priority === "HIGH" || priority === "EMERGENCY";
+
+      // Log priority audit event
+      await prisma.statusEvent.create({
+        data: {
+          requestId: request.id,
+          performedById: currentUser.id,
+          performedByName: currentUser.name,
+          eventType: "PRIORITY_CHANGE",
+          note: `Priority changed from ${request.priority} to ${priority} by ${currentUser.name}.`,
+        },
+      });
+    }
+
     const updated = await prisma.maintenanceRequest.update({
       where: { id: request.id },
       data: updateData,
+      include: {
+        department: true,
+        assignedStaff: {
+          select: { id: true, name: true, email: true, phone: true },
+        },
+        attachments: true,
+        statusEvents: {
+          orderBy: { createdAt: "desc" },
+        },
+        followUps: {
+          orderBy: { createdAt: "asc" },
+        },
+      },
     });
 
     return NextResponse.json({
       success: true,
       request: updated,
-      message: "Contact preferences updated successfully.",
+      message: "Request updated successfully.",
     });
   } catch (error) {
-    console.error("Error updating request contact preferences:", error);
+    console.error("Error updating request:", error);
     return NextResponse.json(
       { success: false, error: "Failed to update request." },
       { status: 500 }

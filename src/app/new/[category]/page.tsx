@@ -36,6 +36,7 @@ import {
   Camera,
   ArrowUpRight,
   Pen,
+  Phone,
 } from "lucide-react";
 import { saveTicketToStorage } from "@/lib/storage/ticketStorage";
 import ImageLightboxModal from "@/components/ImageLightboxModal";
@@ -100,13 +101,14 @@ export default function NewComplaintPage() {
     locationPrimary: "",
     locationRoom: "",
     corridor: "",
-    availability: "Weekdays 2:00 PM - 5:00 PM",
+    preferredDate: new Date(Date.now() + 86400000).toISOString().split("T")[0],
+    preferredStartTime: "10:00",
+    preferredEndTime: "12:00",
     domain: initialCategory.allowedDomains[0] || "Electrical",
     subDomain1: "",
     subDomain2: "",
     subject: "",
     description: "",
-    isUrgent: false,
     website_url: "", // Anti-bot honeypot
   });
 
@@ -515,11 +517,11 @@ export default function NewComplaintPage() {
       locationCategory: category.name,
       locationDetail,
       corridor: formData.corridor || null,
-      availability: formData.availability,
+      availability: `${formData.preferredDate} (${formData.preferredStartTime} - ${formData.preferredEndTime})`,
       subject: formData.subject,
       description: formData.description,
-      priority: formData.isUrgent ? "HIGH" : "NORMAL",
-      isUrgent: formData.isUrgent,
+      priority: "NORMAL",
+      isUrgent: false,
       website_url: formData.website_url,
       attachments,
     };
@@ -1341,19 +1343,75 @@ export default function NewComplaintPage() {
               </div>
             )}
 
-            {/* Availability */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+            {/* Preferred Visit Time - 3 Selectors: Date, Start Time, End Time */}
+            <div className="space-y-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
                 Preferred Technician Visit Window <span className="text-rose-500">*</span>
               </label>
-              <input
-                type="text"
-                required
-                value={formData.availability}
-                onChange={(e) => setFormData({ ...formData, availability: e.target.value })}
-                placeholder="e.g. Today after 4 PM, or Weekdays 10 AM - 1 PM"
-                className="w-full text-sm px-3.5 py-2.5 rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
-              />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* 1. Date Selector */}
+                <div>
+                  <span className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                    Visit Date
+                  </span>
+                  <input
+                    type="date"
+                    required
+                    min={new Date().toISOString().split("T")[0]}
+                    value={formData.preferredDate}
+                    onChange={(e) => setFormData({ ...formData, preferredDate: e.target.value })}
+                    className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500 font-medium"
+                  />
+                </div>
+
+                {/* 2. Start Time Selector */}
+                <div>
+                  <span className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                    Earliest Start Time
+                  </span>
+                  <input
+                    type="time"
+                    required
+                    value={formData.preferredStartTime}
+                    onChange={(e) => setFormData({ ...formData, preferredStartTime: e.target.value })}
+                    className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500 font-medium"
+                  />
+                </div>
+
+                {/* 3. End Time Selector */}
+                <div>
+                  <span className="block text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1">
+                    Latest End Time
+                  </span>
+                  <input
+                    type="time"
+                    required
+                    value={formData.preferredEndTime}
+                    onChange={(e) => setFormData({ ...formData, preferredEndTime: e.target.value })}
+                    className="w-full text-xs sm:text-sm px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500 font-medium"
+                  />
+                </div>
+              </div>
+
+              {formData.preferredDate && formData.preferredStartTime && formData.preferredEndTime && (
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5 pt-0.5">
+                  <Clock className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                  <span>
+                    Availability logged:{" "}
+                    <strong className="text-slate-700 dark:text-slate-200">
+                      {new Date(formData.preferredDate + "T00:00:00").toLocaleDateString(undefined, {
+                        weekday: "short",
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
+                    </strong>{" "}
+                    between{" "}
+                    <strong className="text-slate-700 dark:text-slate-200">{formData.preferredStartTime}</strong> and{" "}
+                    <strong className="text-slate-700 dark:text-slate-200">{formData.preferredEndTime}</strong>
+                  </span>
+                </p>
+              )}
             </div>
           </div>
 
@@ -1728,41 +1786,33 @@ export default function NewComplaintPage() {
               )}
             </div>
 
-            {/* Urgent / Safety Hazard Toggle */}
-            <div
-              className={`p-4 rounded-2xl border transition-all flex items-start space-x-3.5 cursor-pointer ${
-                formData.isUrgent
-                  ? "bg-rose-50/90 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800 ring-2 ring-rose-500/20 text-rose-950 dark:text-rose-100 shadow-xs"
-                  : "bg-slate-50/80 dark:bg-slate-800/40 hover:bg-rose-50/30 dark:hover:bg-rose-950/20 border-slate-200 dark:border-slate-800 hover:border-rose-200 dark:hover:border-rose-900/40 text-slate-700 dark:text-slate-300"
-              }`}
-              onClick={() => setFormData({ ...formData, isUrgent: !formData.isUrgent })}
-            >
-              <div className="mt-0.5 shrink-0">
-                <input
-                  type="checkbox"
-                  id="isUrgent"
-                  checked={formData.isUrgent}
-                  onChange={(e) => setFormData({ ...formData, isUrgent: e.target.checked })}
-                  onClick={(e) => e.stopPropagation()}
-                  className="w-4 h-4 rounded text-rose-600 border-slate-300 dark:border-slate-600 focus:ring-rose-500 cursor-pointer"
-                />
+            {/* 24x7 Emergency Control Room Notice Card */}
+            <div className="p-4 sm:p-5 rounded-2xl bg-amber-50/90 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/50 space-y-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span className="font-bold text-xs text-amber-950 dark:text-amber-100">
+                  Active Safety Hazard or Emergency?
+                </span>
               </div>
-
-              <div className="space-y-1 text-xs select-none">
-                <div className="flex items-center gap-1.5 font-bold">
-                  <AlertTriangle className={`w-3.5 h-3.5 shrink-0 ${formData.isUrgent ? "text-rose-600 dark:text-rose-400" : "text-amber-500 dark:text-amber-400"}`} />
-                  <span className={formData.isUrgent ? "text-rose-900 dark:text-rose-200" : "text-slate-900 dark:text-white"}>
-                    Flag as Urgent / Safety Hazard (Emergency)
-                  </span>
-                  {formData.isUrgent && (
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase bg-rose-200 dark:bg-rose-900 text-rose-800 dark:text-rose-200 animate-pulse ml-1">
-                      Active Emergency
-                    </span>
-                  )}
-                </div>
-                <p className={`text-[11px] leading-relaxed ${formData.isUrgent ? "text-rose-800 dark:text-rose-300/90" : "text-slate-500 dark:text-slate-400"}`}>
-                  Check only for active hazards (e.g. sparking switchboard, active flooding, gas leak). Urgent requests alert the 24x7 control room immediately.
-                </p>
+              <p className="text-[11px] text-amber-800 dark:text-amber-300/90 leading-relaxed">
+                For active hazards requiring immediate physical intervention (e.g. sparking switchboard, active flooding, gas leak, bare wires), do not wait for regular ticket processing. Please dial the <strong>24x7 Campus Maintenance Control Room</strong> immediately:
+              </p>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-1 text-xs font-semibold text-amber-950 dark:text-amber-100">
+                <a
+                  href="tel:07923952000"
+                  className="inline-flex items-center gap-1.5 text-amber-900 dark:text-amber-200 hover:text-amber-700 dark:hover:text-amber-100 hover:underline"
+                >
+                  <Phone className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span>079-2395-2000 (Internal Ext: 2000)</span>
+                </a>
+                <span className="text-amber-400 hidden sm:inline">•</span>
+                <a
+                  href="tel:07923952026"
+                  className="inline-flex items-center gap-1.5 text-amber-900 dark:text-amber-200 hover:text-amber-700 dark:hover:text-amber-100 hover:underline"
+                >
+                  <Phone className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span>079-2395-2026</span>
+                </a>
               </div>
             </div>
           </div>
