@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { clearSessionUserCookie } from "@/lib/auth/session";
+import { destroySession } from "@/lib/auth/session";
 
 export async function POST(req: NextRequest) {
   try {
-    clearSessionUserCookie();
+    await destroySession();
     
     // Support standard form post or fetch redirect
     const acceptHeader = req.headers.get("accept") || "";

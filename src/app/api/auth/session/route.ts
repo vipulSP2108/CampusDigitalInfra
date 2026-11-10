@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getCurrentUser, setSessionUserCookie, clearSessionUserCookie } from "@/lib/auth/session";
+import { getCurrentUser, createSession, destroySession } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 
 export async function GET() {
@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: "Staff member not found" }, { status: 404 });
     }
 
-    setSessionUserCookie(email);
+    await createSession(email);
 
     return NextResponse.json({
       success: true,
@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
 
 export async function DELETE() {
   try {
-    clearSessionUserCookie();
+    await destroySession();
     return NextResponse.json({ success: true, message: "Logged out successfully" });
   } catch (error) {
     return NextResponse.json({ success: false, error: "Failed to log out" }, { status: 500 });

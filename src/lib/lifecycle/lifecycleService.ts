@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import {
   LIFECYCLE_CONFIG,
   calculatePurgeDate,
+  isClosedTicketArchiveDue,
 } from "@/config/lifecycle";
 
 export interface ArchivalSweepResult {
@@ -88,26 +89,42 @@ export async function archiveSingleRequest(requestId: string) {
 
 /**
  * Sweeps the database according to institutional lifecycle rules:
- * 1. Closed requests older than 3 days (cooldown expired) -> transferred to secondary storage.
+ * 1. Closed requests whose grace period expired -> transferred to secondary storage.
+ *    - Admin/staff closed: 3 days grace
+ *    - User/resident closed: 15 minutes grace
  * 2. Archived requests older than 180 days -> permanently purged.
  */
 export async function checkAndRunArchivalSweep(): Promise<ArchivalSweepResult> {
   const now = new Date();
 
-  // Closed requests due for secondary archival storage (> 3 days cooldown expired)
-  const threeDaysCooldownThreshold = new Date(
+  // For admin-closed: 3 days threshold
+  const adminThreshold = new Date(
     now.getTime() - LIFECYCLE_CONFIG.ADMIN_CLOSED_REOPEN_GRACE_DAYS * 24 * 60 * 60 * 1000
   );
 
-  const closedDueCandidates = await prisma.maintenanceRequest.findMany({
+  // For user-closed: 15 minutes threshold
+  const userThreshold = new Date(
+    now.getTime() - LIFECYCLE_CONFIG.USER_CLOSED_ARCHIVE_DELAY_MINUTES * 60 * 1000
+  );
+
+  // Find all closed tickets
+  const closedTickets = await prisma.maintenanceRequest.findMany({
     where: {
       status: "CLOSED",
-      OR: [
-        { closedAt: { lte: threeDaysCooldownThreshold } },
-        { closedAt: null, updatedAt: { lte: threeDaysCooldownThreshold } },
-      ],
     },
-    select: { id: true, closedByRole: true },
+    select: { id: true, closedAt: true, closedByRole: true },
+  });
+
+  // Filter in-memory based on who closed it and their respective grace period
+  const closedDueCandidates = closedTickets.filter((c) => {
+    if (!c.closedAt) return false;
+    const closedTime = new Date(c.closedAt).getTime();
+    if (c.closedByRole === "requester") {
+      // User-closed: 15 minutes
+      return closedTime <= userThreshold.getTime();
+    }
+    // Admin/staff-closed: 3 days
+    return closedTime <= adminThreshold.getTime();
   });
 
   let archivedAdminClosedCount = 0;

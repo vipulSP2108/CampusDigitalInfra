@@ -288,6 +288,9 @@ export default function LoginPage() {
                         ? "bg-cyan-50 dark:bg-cyan-950/70 border-cyan-200 dark:border-cyan-900/60 text-cyan-700 dark:text-cyan-300"
                         : "bg-emerald-50 dark:bg-emerald-950/70 border-emerald-200 dark:border-emerald-900/60 text-emerald-700 dark:text-emerald-300";
 
+                // Check if demo mode is enabled via env (default false for production)
+                const demoMode = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
+
                 return (
                   <button
                     key={user.email}
@@ -305,7 +308,10 @@ export default function LoginPage() {
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
-                        {user.email} • PW: <span className="font-mono text-slate-700 dark:text-slate-300">{user.password || "asd@123"}</span>
+                        {user.email}
+                        {demoMode ? (
+                          <> • PW: <span className="font-mono text-slate-700 dark:text-slate-300">{user.password || "asd@123"}</span> </>
+                        ) : null}
                         {user.departmentName ? ` • ${user.departmentName}` : ""}
                       </p>
                     </div>
