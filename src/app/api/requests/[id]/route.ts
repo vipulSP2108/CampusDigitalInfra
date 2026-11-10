@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
 import { canAccessDepartment } from "@/lib/auth/rbac";
-import { getArchivedRequestByTicket, archiveSingleRequest } from "@/lib/lifecycle/lifecycleService";
+import { getArchivedRequestByTicket } from "@/lib/lifecycle/lifecycleService";
 import { LIFECYCLE_CONFIG } from "@/config/lifecycle";
 import { canStaffViewResidentPhone } from "@/config/privacy";
 
@@ -117,47 +117,28 @@ export async function GET(
       return true;
     });
 
-    // Calculate Reopen Grace Period Status (3-day cooldown for all closed requests)
+    // Calculate Reopen Grace Period Status based on who closed the ticket
     const isClosed = request.status === "CLOSED";
     let canReopen = request.status !== "CLOSED";
     let reopenDeadline: string | null = null;
-    let graceWindowType: "3_days" | null = null;
+    let graceWindowType: "3_days" | "15_minutes" | null = null;
 
     if (isClosed && request.closedAt) {
-      graceWindowType = "3_days";
-      const graceMs = LIFECYCLE_CONFIG.ADMIN_CLOSED_REOPEN_GRACE_DAYS * 24 * 60 * 60 * 1000;
-      const deadline = new Date(new Date(request.closedAt).getTime() + graceMs);
-      canReopen = Date.now() <= deadline.getTime();
-      reopenDeadline = deadline.toISOString();
-    }
-
-    // If ticket grace period has concluded, immediately transfer to secondary archival storage
-    if (isClosed && !canReopen) {
-      try {
-        await archiveSingleRequest(request.id);
-        const archived = await getArchivedRequestByTicket(request.ticketNumber);
-        if (archived) {
-          const canStaffCall = canStaffViewResidentPhone(archived);
-          const effectivePhone = (isRequesterUser || isAuthorizedRequester || canStaffCall)
-            ? archived.requesterPhone
-            : null;
-
-          return NextResponse.json({
-            success: true,
-            request: {
-              ...archived,
-              requesterPhone: effectivePhone,
-              canStaffCall,
-              sharePhoneWithStaff: archived.sharePhoneWithStaff ?? true,
-              followUps: visibleFollowUps,
-              isArchived: true,
-              canReopen: false,
-              reopenReasonMessage: "This request has exceeded the grace period and is archived in secondary storage.",
-            },
-          });
-        }
-      } catch (archErr) {
-        console.error("Auto archival on single request fetch failed:", archErr);
+      const closedByRole = request.closedByRole || "admin";
+      if (closedByRole === "requester") {
+        // User/resident closed: 15 minutes grace
+        graceWindowType = "15_minutes";
+        const graceMs = LIFECYCLE_CONFIG.USER_CLOSED_ARCHIVE_DELAY_MINUTES * 60 * 1000;
+        const deadline = new Date(new Date(request.closedAt).getTime() + graceMs);
+        canReopen = Date.now() <= deadline.getTime();
+        reopenDeadline = deadline.toISOString();
+      } else {
+        // Admin/staff closed: 3 days grace
+        graceWindowType = "3_days";
+        const graceMs = LIFECYCLE_CONFIG.ADMIN_CLOSED_REOPEN_GRACE_DAYS * 24 * 60 * 60 * 1000;
+        const deadline = new Date(new Date(request.closedAt).getTime() + graceMs);
+        canReopen = Date.now() <= deadline.getTime();
+        reopenDeadline = deadline.toISOString();
       }
     }
 
