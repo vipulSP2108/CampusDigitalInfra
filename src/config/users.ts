@@ -1,6 +1,12 @@
 export interface AllowedUserConfig {
   email: string;
+  /**
+   * @deprecated Prefer `passwordHash`. Plaintext demo passwords only work in
+   * non-production and are compared in constant time.
+   */
   password?: string;
+  /** Preferred: scrypt hash produced by `hashPassword()` in lib/auth/password.ts */
+  passwordHash?: string;
   name: string;
   roleCode: "OVERALL_ADMIN" | "DEPT_ADMIN" | "DEPT_STAFF" | "PUBLIC";
   roleName?: string;

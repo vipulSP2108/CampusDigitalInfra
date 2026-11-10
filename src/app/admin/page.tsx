@@ -267,6 +267,7 @@ export default function AdminPortalPage() {
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
 
   // Load Session and Demo Profiles (NO auto-login for incognito/anonymous)
   const loadSession = async () => {
@@ -277,6 +278,7 @@ export default function AdminPortalPage() {
       if (data.success) {
         setCurrentUser(data.user || null);
         setDemoProfiles(data.demoProfiles || []);
+        setDemoMode(Boolean(data.demoMode));
       }
     } catch (e) {
       console.error("Failed to load session:", e);
@@ -299,7 +301,11 @@ export default function AdminPortalPage() {
       const res = await fetch("/api/auth/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: emailToUse }),
+        // Password is always forwarded; the server enforces it (no bypass).
+        body: JSON.stringify({
+          email: emailToUse,
+          password: directEmail ? undefined : loginPassword,
+        }),
       });
       const data = await res.json();
       if (data.success) {
@@ -1258,7 +1264,8 @@ export default function AdminPortalPage() {
             </button>
           </form>
 
-          {/* Quick Staff Sign-In Selector for Authorized Review */}
+          {/* Quick Staff Sign-In Selector (demo mode only) */}
+          {demoMode && (
           <div className="pt-6 border-t border-slate-100 dark:border-slate-800 space-y-3">
             <p className="text-[11px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider text-center">
               Quick Sign-In by Role (Authorized Staff Accounts)
@@ -1296,6 +1303,7 @@ export default function AdminPortalPage() {
               ))}
             </div>
           </div>
+          )}
         </div>
       </div>
     );

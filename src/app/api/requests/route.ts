@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
 import { buildDepartmentFilter } from "@/lib/auth/rbac";
-import { checkAndRunArchivalSweep } from "@/lib/lifecycle/lifecycleService";
 import { sortComplaintsByOperationalPriority } from "@/lib/queue/sorting";
+import { rateLimit, clientKey, envInt } from "@/lib/security/rateLimit";
 import crypto from "crypto";
 
 // Map domains to department codes
@@ -124,13 +124,6 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: "desc" },
     });
 
-    // Ensure archival sweep runs to keep primary database and secondary storage synchronized
-    try {
-      await checkAndRunArchivalSweep();
-    } catch (e) {
-      console.error("Archival sweep error:", e);
-    }
-
     // Sort complaints by operational priority according to role context
     const sortedRequests = sortComplaintsByOperationalPriority(requests, currentUser);
 
@@ -155,6 +148,16 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    // Anti-abuse: cap public complaint submissions per IP.
+    const submitLimit = envInt("RATE_LIMIT_SUBMIT_MAX", 10);
+    const rl = rateLimit(clientKey(req, "submit"), submitLimit, 60 * 60 * 1000);
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { success: false, error: "Too many submissions from this network. Please try again later." },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfterSeconds) } }
+      );
+    }
+
     const body = await req.json();
 
     // Anti-bot honeypot check

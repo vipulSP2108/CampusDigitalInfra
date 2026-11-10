@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Sparkles, X, ArrowLeft, Building2, ShieldCheck, UserCheck, HelpCircle } from "lucide-react";
-import { ALLOWED_USERS } from "@/config/users";
+import { PUBLIC_ACCOUNTS } from "@/config/publicAccounts";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -54,11 +54,12 @@ export default function LoginPage() {
     await handleLoginWithCredentials(email, password);
   }
 
-  const handleSelectAccount = (accEmail: string, accPassword?: string) => {
+  // Selecting an account only prefills the email — the password is never stored
+  // in the client bundle and must be entered by the user.
+  const handleSelectAccount = (accEmail: string) => {
     setEmail(accEmail);
-    setPassword(accPassword || "asd@123");
+    setPassword("");
     setShowAccountsModal(false);
-    handleLoginWithCredentials(accEmail, accPassword || "asd@123");
   };
 
   return (
@@ -261,10 +262,10 @@ export default function LoginPage() {
               <div>
                 <h3 className="text-sm font-bold flex items-center gap-1.5">
                   <Sparkles className="w-4 h-4 text-amber-500" />
-                  Configured Demo Logins
+                  Configured Accounts
                 </h3>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Password for all: <strong className="text-slate-800 dark:text-slate-200">asd@123</strong>
+                  Select an account to prefill the email, then enter its password.
                 </p>
               </div>
               <button
@@ -277,7 +278,7 @@ export default function LoginPage() {
             </div>
 
             <div className="space-y-2 max-h-[55vh] overflow-y-auto px-0.5">
-              {ALLOWED_USERS.map((user) => {
+              {PUBLIC_ACCOUNTS.map((user) => {
                 const isRegularUser = user.roleCode === "PUBLIC";
                 const badgeColor =
                   user.roleCode === "OVERALL_ADMIN"
@@ -292,7 +293,7 @@ export default function LoginPage() {
                   <button
                     key={user.email}
                     type="button"
-                    onClick={() => handleSelectAccount(user.email, user.password || "asd@123")}
+                    onClick={() => handleSelectAccount(user.email)}
                     className="w-full text-left px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-800/80 hover:border-blue-400 hover:bg-blue-50/40 dark:hover:bg-slate-800 transition-all flex items-center justify-between group cursor-pointer shadow-2xs"
                   >
                     <div className="min-w-0 flex-1">
@@ -305,12 +306,12 @@ export default function LoginPage() {
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
-                        {user.email} • PW: <span className="font-mono text-slate-700 dark:text-slate-300">{user.password || "asd@123"}</span>
+                        {user.email}
                         {user.departmentName ? ` • ${user.departmentName}` : ""}
                       </p>
                     </div>
                     <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 shrink-0 ml-2">
-                      Sign in &rarr;
+                      Use email &rarr;
                     </span>
                   </button>
                 );
@@ -318,7 +319,7 @@ export default function LoginPage() {
             </div>
 
             <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-              <span>Click any account to authenticate instantly</span>
+              <span>Passwords are never shown or stored in the browser</span>
               <button
                 type="button"
                 onClick={() => setShowAccountsModal(false)}

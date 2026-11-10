@@ -11,7 +11,7 @@ services:
       - key: NODE_ENV
         value: "production"
       - key: DATABASE_URL
-        value: "file:/app/prisma/dev.db"
+        value: "file:/app/data/prod.db"
       - key: COOKIE_SECRET
         generateValue: true
       - key: APP_BASE_URL
@@ -24,9 +24,8 @@ services:
         value: "disabled"
     autoDeploy: true
 
-    # Optional persistent disk for Render Starter plan ($7/mo + $1/mo disk):
-    # disk:
-    #   name: mrs-data
-    #   mountPath: /app/data
-    #   sizeGB: 1
-
+    # Persistent disk for production database
+    disk:
+      name: mrs-data
+      mountPath: /app/data
+      sizeGB: 1

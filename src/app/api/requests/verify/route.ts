@@ -1,8 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { rateLimit, clientKey, envInt } from "@/lib/security/rateLimit";
 
 export async function POST(req: NextRequest) {
   try {
+    // Brute-force protection: verification attempts are cheap to guess at.
+    const limit = envInt("RATE_LIMIT_VERIFY_PER_HOUR", 30);
+    const rl = rateLimit(clientKey(req, "verify"), limit, 60 * 60 * 1000);
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { success: false, error: "Too many verification attempts. Please try again later." },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfterSeconds) } }
+      );
+    }
+
     const { ticketNumber, token, email, phone } = await req.json();
 
     if (!ticketNumber) {
